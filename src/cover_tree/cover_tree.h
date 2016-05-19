@@ -1,4 +1,4 @@
-﻿# ifndef COVER_TREE_H
+# ifndef COVER_TREE_H
 # define COVER_TREE_H
 
 //#define DEBUG
@@ -12,7 +12,10 @@
 #include <fstream>
 #include <iostream>
 
-typedef Eigen::VectorXd point;
+typedef struct { 
+    Eigen::VectorXd pt; 
+    size_t ident;
+} point;
 
 // Base to use for the calculations
 double base = 2.0;
@@ -78,12 +81,12 @@ public:
 		
 		double dist(const point& pp) const
 		{
-			return (_p - pp).norm();
+			return (_p.pt - pp.pt).norm();
 		}
 
 		double dist(Node* n) const
 		{
-			return (_p - n->_p).norm();
+			return (_p.pt - n->_p.pt).norm();
 		}
 
 		/*** Iterator access ***/
@@ -110,7 +113,7 @@ public:
 		friend std::ostream& operator<<(std::ostream& os, const Node& ct)
 		{
 			Eigen::IOFormat CommaInitFmt(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", ", ", "", "", "[", "]");
-			os << "(" << ct._p.format(CommaInitFmt) << ":" << ct.level << ":" << ct.maxdistUB << ")";
+			os << "(" << ct._p.pt.format(CommaInitFmt) << ":" << ct.level << ":" << ct.maxdistUB << ")";
 			return os;
 		}
 	};
@@ -442,7 +445,7 @@ public:
 	{
         // Do the worst initialization
         Node* dummyNode = new Node();
-	dummyNode->_p = 1e100*root->_p;
+        dummyNode->_p.pt = 1e100*root->_p.pt;
         dummyNode->tempDist = std::numeric_limits<double>::max();
         // List of k-nearest points till now
         std::vector<Node*> nnListn(numNbrs, dummyNode);

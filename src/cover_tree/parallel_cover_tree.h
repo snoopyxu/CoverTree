@@ -6,6 +6,7 @@
 #include <future>
 #include <mutex>
 #include <thread>
+#include <chrono>
 
 #include "cover_tree.h"
 
@@ -15,17 +16,19 @@ class ParallelMake
 {
 	int left;
 	int right;
-	std::vector<point>& pList;
+    std::vector<point>& pList;
 	
 	CoverTree* CT;
 
 	void run()
 	{
-		CT = new CoverTree(pList, left, right);
+		std::cout << "Inserting 50000..." << std::endl;
+        CT = new CoverTree(pList, left, right);
+        std::cout << "Inserted 50000! " << std::endl;
 	}
 
 public:
-	ParallelMake(int left, int right, std::vector<point>& pL) : pList(pL)
+    ParallelMake(int left, int right, std::vector<point>& pL) : pList(pL)
 	{
 		this->left = left;
 		this->right = right;
@@ -52,20 +55,29 @@ public:
 
 		f1.get();
 		f2.get();
-
+        
+        ts = std::chrono::high_resolution_clock::now();
 		if (t1->CT->get_level() > t1->CT->get_level())
 		{
-			t1->CT->Merge(t2->CT);
+			std::cout << "merging t1->t2" << std::endl;
+            t1->CT->Merge(t2->CT);
 			CT = t1->CT;
 		}
 		else
 		{
-			t2->CT->Merge(t1->CT);
+            std::cout << "merging t2->t1" << std::endl;
+            t2->CT->Merge(t1->CT);
 			CT = t2->CT;
 		}
-
+        tn = std::chrono::high_resolution_clock::now();
+        std::cout << "merge time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << " ";
+        
+        ts = std::chrono::high_resolution_clock::now();
 		delete t1;
 		delete t2;
+        tn = std::chrono::high_resolution_clock::now();
+
+        std::cout << "del time: " <<  std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
 
 		return 0;
 	}
