@@ -56,7 +56,7 @@ public:
 		f1.get();
 		f2.get();
         
-        ts = std::chrono::high_resolution_clock::now();
+        auto ts = std::chrono::high_resolution_clock::now();
 		if (t1->CT->get_level() > t1->CT->get_level())
 		{
 			std::cout << "merging t1->t2" << std::endl;
@@ -69,7 +69,7 @@ public:
             t2->CT->Merge(t1->CT);
 			CT = t2->CT;
 		}
-        tn = std::chrono::high_resolution_clock::now();
+        auto tn = std::chrono::high_resolution_clock::now();
         std::cout << "merge time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << " ";
         
         ts = std::chrono::high_resolution_clock::now();
