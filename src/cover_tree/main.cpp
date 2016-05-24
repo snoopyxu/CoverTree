@@ -253,14 +253,16 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
                           "Content-Length: %d\r\n"
                           "\r\n"
                           "%s",
-                          (int) res.length() + 1, res.c_str());
+                          (int) res.length(), res.c_str());
+            c->flags |= MG_F_SEND_AND_CLOSE;
             
         } else {
             
             mg_printf(c, "HTTP/1.1 200 OK\r\n"
-                  "Content-Type: text/html\r\n"
+                  "Content-Type: application/json\r\n"
                   "Content-Length: 0\r\n"
                   );
+            c->flags |= MG_F_SEND_AND_CLOSE;
             
         }
     }
