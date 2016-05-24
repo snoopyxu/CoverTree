@@ -160,13 +160,14 @@ std::string format_res(std::string region,
     }
     std::ostringstream ss;
     ss << "{\"duration\":0.5,\"matches\":[";
-    
+    size_t penultimate = res_filenames.size() - 1;
     for(size_t i = 0 ; i < res_filenames.size(); ++i) {
         std::vector<float>& curr_pca = pca[i];
         ss << "{";
         ss << "\"distance\":" << distances[i] << ",";
         ss << "\"filename\":\"" << res_filenames[i] << "\",";
-        ss << "\"tsne_pos\":[" << curr_pca[0] << "," << curr_pca[1] << "]},";
+        ss << "\"tsne_pos\":[" << curr_pca[0] << "," << curr_pca[1] << "]}";
+        if(i != penultimate) ss << ",";
     }
     ss << "],";
     ss << "\"features_filename\":\"a\"";
