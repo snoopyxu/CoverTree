@@ -12,12 +12,12 @@ INTEL_LFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -I"${MKLROOT}"/include -O3 -marc
 INTEL_TFLAGS = -I"$(CDIR)" -fast -DNDEBUG -std=c++14 -inline-factor=500 -no-inline-max-size -no-inline-max-total-size -use-intel-optimized-headers -parallel -qopt-prefetch=4 -qopt-mem-layout-trans=3 -pthread 
 
 GNU_CC = g++
-GNU_CFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -ffloat-store -pthread -std=c++11 -fopenmp  -c
-GNU_LFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -ffloat-store -pthread -std=c++11 -fopenmp
+GNU_CFLAGS = $(DEBUG) -DMG_ENABLE_THREADS -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -ffloat-store -pthread -std=c++1y -fopenmp  -c
+GNU_LFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -ffloat-store -pthread -std=c++1y -fopenmp
 
 CC = $(GNU_CC)
 CFLAGS = $(GNU_CFLAGS)
-LFLAGS = $(GNU_LFLAGS)
+LFLAGS = $(GNU_LFLAGS) 
 
 SOURCEDIR = .
 BUILDDIR = ../../build
@@ -39,12 +39,12 @@ intel: LFLAGS=$(INTEL_LFLAGS)
 intel: $(EXECUTABLE)
  
 $(EXECUTABLE): $(COBJECT)  $(OBJECTS)
-	$(CC) $(LFLAGS) $^ -o $@
+	$(CC) -DMG_ENABLE_THREADS $(LFLAGS) $^ mongoose.c -o $@
 
 $(OBJECTS): $(BUILDDIR)/%.o : $(SOURCEDIR)/%.cpp
 	$(CC) $(CFLAGS) $< -o $@
 
-$(COBJECT): $(BUILDDIR)/%.o : $(SOURCEDIR)/../commons/%.cpp
+$(COBJECT): $(BUILDDIR)/%.o : $(SOURCEDIR)/../commons/%.c
 	$(CC) $(CFLAGS) $< -o $@
 
 inteltogether:

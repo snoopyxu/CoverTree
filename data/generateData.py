@@ -1,7 +1,7 @@
 import numpy as np
 
-numPts = 1000;
-numDims = 100;
+numPts = 500;
+numDims = 512;
 numK = 1000;
 
 means = 200*np.random.rand(numK, numDims) - 100;

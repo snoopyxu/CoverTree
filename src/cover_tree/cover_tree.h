@@ -18,7 +18,7 @@ typedef struct {
 } point;
 
 // Base to use for the calculations
-double base = 2.0;
+double base = 1.3;
 double powdict[2048];
 
 //template<class point>
@@ -558,8 +558,7 @@ public:
 	}
 
 	//contructor: needs atleast 1 point to make a valid covertree
-	CoverTree(std::vector<point>& pList)
-	{
+	CoverTree(std::vector<point>& pList) {
 		point temp = pList.back();
 		pList.pop_back();
 		

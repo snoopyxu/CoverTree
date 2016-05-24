@@ -4,14 +4,37 @@
 # include <iostream>
 # include <exception>
 # include <Eigen/Core>
+# include <Eigen/Eigenvalues> 
 # include <string>
+# include <array>
 # include <unordered_map>
-    // User header
+# include <picojson.h>
+
+extern "C" {
+    # include "mongoose.h"
+}
+    //# include <json/json.h>
+
+// User header
 # include "cover_tree.h"
 # include "parallel_cover_tree.h"
 
-std::unordered_map<std::string, size_t> filename_map;
-    
+struct query {
+    std::string filename;
+    std::string region;
+    int limit;
+    int level;
+    bool okay;
+};
+
+// map from region to filenames, points & c-trees
+std::unordered_map<std::string, std::unordered_map<std::string, size_t> > filename_reverse;
+std::unordered_map<std::string, std::vector<point> > points;
+std::unordered_map<std::string, std::vector<std::string> > filenames_map;
+std::unordered_map<std::string, CoverTree*> cTree_map;
+
+std::vector<std::string> regions;
+
 template<class InputIt, class UnaryFunction>
 UnaryFunction parallel_for_each(InputIt first, InputIt last, UnaryFunction f)
 {
@@ -25,7 +48,7 @@ UnaryFunction parallel_for_each(InputIt first, InputIt last, UnaryFunction f)
     const size_t total_length = std::distance(first, last);
     const size_t chunk_length = total_length / cores;
     InputIt chunk_start = first;
-    std::vector<std::future<void>>  for_threads;
+    std::vector<std::future<void>> for_threads;
     for (unsigned i = 0; i < cores - 1; ++i)
     {
         const auto chunk_stop = std::next(chunk_start, chunk_length);
@@ -53,11 +76,6 @@ std::vector<std::string> read_lines(std::ifstream& in_file) {
 
 std::vector<point> readPointFile(std::string fileName)
 {
-    Eigen::initParallel();
-    std::cout << "Number of OpenMP threads: " << Eigen::nbThreads( );
-    for(int i=0; i<2048; ++i)
-        powdict[i] = pow(base, i-1024);
-    
     std::ifstream fin(fileName, std::ios::in|std::ios::binary);
     
     // Check for existance for file
@@ -103,108 +121,239 @@ std::vector<point> readPointFile(std::string fileName)
     return pointList;
 }
 
+std::vector<std::vector<float> > pca_2(std::vector<point> results) {
+    Eigen::MatrixXd mat(512, results.size());
+    for(size_t i = 0; i < results.size(); ++i) {
+        mat.col(i) = results[i].pt;//.transpose();
+    }
+    Eigen::MatrixXd centered = mat.rowwise() - mat.colwise().mean();
+    Eigen::MatrixXd cov = centered.adjoint() * centered;
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eig(cov, Eigen::ComputeEigenvectors);
+    std::vector<std::vector<float > > res;
+    res.reserve(results.size());
+    Eigen::VectorXd v_1 = eig.eigenvectors().col(0);
+    Eigen::VectorXd v_2 = eig.eigenvectors().col(1);
+    v_1.normalize();
+    v_2.normalize();
+    for(size_t i = 0; i < results.size(); ++i) {
+        std::vector<float> temp;
+        temp.reserve(2);
+        temp.push_back(v_1(i));
+        temp.push_back(v_2(i));
+        res.push_back(temp);
+    }
+    return res;
+}
 
+std::string format_res(std::string region, 
+                       point& search_feature, 
+                       std::vector<point> &similar_features,
+                       std::vector<std::vector<float> > pca) {
+    
+    std::vector<std::string> res_filenames(similar_features.size());
+    std::vector<float> distances(similar_features.size());
+    
+    for(size_t i = 0; i < res_filenames.size(); ++i) {
+        point& f = similar_features[i];
+        res_filenames[i] = filenames_map[region][f.ident];
+        distances[i] = (search_feature.pt - f.pt).norm();
+    }
+    std::ostringstream ss;
+    ss << "{\"duration\":0.5,\"matches\":[";
+    
+    for(size_t i = 0 ; i < res_filenames.size(); ++i) {
+        std::vector<float>& curr_pca = pca[i];
+        ss << "{";
+        ss << "\"distance\":" << distances[i] << ",";
+        ss << "\"filename\":\"" << res_filenames[i] << "\",";
+        ss << "\"tsne_pos\":[" << curr_pca[0] << "," << curr_pca[1] << "]},";
+    }
+    ss << "],";
+    ss << "\"features_filename\":\"a\"";
+    ss << "}";
+    return ss.str();
+}
+
+std::vector<std::string> split(const std::string &s, char delim) {
+    std::stringstream ss(s);
+    std::string item;
+    std::vector<std::string> tokens;
+    while (getline(ss, item, delim)) {
+        tokens.push_back(item);
+    }
+    return tokens;
+}
+
+bool is_valid_region(std::string region) {
+    return std::find(regions.begin(), regions.end(), region) != regions.end();
+}
+
+struct query parse_query(std::string query_string) {
+    std::vector<std::string> token_pairs = split(query_string, '&');
+    struct query q;
+    if(token_pairs.size() != 4 
+      || !is_valid_region(split(token_pairs[3], '=')[1])) {
+        q.okay = false;
+        return q;
+    }
+    
+    q.filename = split(token_pairs[0], '=')[1];
+    q.limit = std::stoi(split(token_pairs[1], '=')[1]);
+    if(q.limit > 100) q.limit = 100;
+    q.level = std::stoi(split(token_pairs[2], '=')[1]);
+    q.region = split(token_pairs[3], '=')[1];
+    std::cout << "region: " << q.region << std::endl;
+    q.okay = true;
+    return q;
+}
+
+static void ev_handler(struct mg_connection *c, int ev, void *p) {
+    
+    if (ev == MG_EV_HTTP_REQUEST) {
+        
+        struct http_message *hm = (struct http_message *) p;
+
+        struct mg_str query_buff = hm->query_string;
+        
+        if(query_buff.len != 0) {
+            std::chrono::high_resolution_clock::time_point ts, tn;
+            ts = std::chrono::high_resolution_clock::now();
+            std::string res = "";
+            char query_str[query_buff.len + 1];          
+            std::copy(query_buff.p, query_buff.p + query_buff.len, query_str);         
+            query_str[query_buff.len] = '\0';
+            
+            struct query q = parse_query(query_str);
+            if(!q.okay) { 
+                
+                res = "{\"error\":\"malformed query\"}";
+                
+            } else {
+                
+                std::cout << q.filename << std::endl;
+                std::string region = q.region;
+                size_t filename_idx = filename_reverse[region][q.filename];
+                point feature = points[region][filename_idx];
+                std::cout << "getting nearest" << std::endl;
+                std::vector<point> nearest = cTree_map[region]->nearNeighborsMulti(feature, q.limit);
+                std::cout << "about to pca" << std::endl;
+                std::vector<std::vector<float> > pca = pca_2(nearest);
+                std::cout << "formatting" << std::endl;
+                res = format_res(q.region, feature, nearest, pca);
+                std::cout << "done" << std::endl;
+
+            }
+            
+            tn = std::chrono::high_resolution_clock::now();
+            std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
+            
+            mg_printf(c,  "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json\r\n"
+                          "Content-Length: %d\r\n"
+                          "\r\n"
+                          "%s",
+                          (int) res.length() + 1, res.c_str());
+            
+        } else {
+            
+            mg_printf(c, "HTTP/1.1 200 OK\r\n"
+                  "Content-Type: application/json\r\n"
+                  "Content-Length: 0\r\n"
+                  );
+            
+        }
+    }
+}
 
 int main(int argv, char** argc)
 {
     if (argv < 2)
-        throw std::runtime_error("Usage:\n./main <path to train filenames> <path_to_train_points>");
+        throw std::runtime_error("Usage:\n./main <path to config file> <port>");
     
-    std::cout << argc[1] << std::endl;
-    std::cout << argc[2] << std::endl;
+    std::cout << "config path: " <<  argc[1] << std::endl;
+    std::cout << "port number: " <<  argc[2] << std::endl;
     
-    Eigen::IOFormat CommaInitFmt(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", ", ", "", "", "[", "]");
+    Eigen::initParallel();
+    std::cout << "Number of OpenMP threads: " << Eigen::nbThreads() << std::endl;
+    
+    for(int i=0; i<2048; ++i)
+        powdict[i] = pow(base, i-1024);
+    
+//    Eigen::IOFormat CommaInitFmt(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", ", ", "", "", "[", "]");
     std::chrono::high_resolution_clock::time_point ts, tn;
     
     // Reading the file for points
-    std::ifstream filenames_file(argc[1], std::ios::in);
     
-    if(!filenames_file) throw std::runtime_error("Filenames file not found");
+    std::ifstream config_file(argc[1]);
+    std::stringstream config_data;
+    config_data << config_file.rdbuf();
+    picojson::value config_json;
+    std::string err = picojson::parse(config_json, config_data.str());
     
-    std::vector<std::string> filenames = read_lines(filenames_file);
+    //const picojson::object& config = config_json.get<picojson::object>();
+    std::cout << config_json.to_str() << std::endl;
+    if (! err.empty()) {
+      std::cerr << err << std::endl;
+    }
+    
+    // Load data
 
-    std::vector<point> points = readPointFile(argc[2]);
+    picojson::array regions_config = config_json.get("19").get<picojson::array>();
+    for(auto r : regions_config) {
+        std::string region = r.get("region").get<std::string>();
+        std::string filenames_path = r.get("filenames").get<std::string>();
         
-    std::cout << "Files read" << std::endl;
-    
-    CoverTree* cTree;
-    // Parallel Cover tree construction
-    ts = std::chrono::high_resolution_clock::now();
-    ParallelMake pct(0, points.size(), points);
-    pct.compute();
-    std::cout << "Computed!" << std::endl;
-    cTree = pct.get_result();
-    
-    // Single core Cover tree construction
-    //cTree = new CoverTree(pointList);
-    
-    tn = std::chrono::high_resolution_clock::now();
-    std::cout << "Build time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
-    //std::cout << *cTree << std::endl;
-    cTree->calc_maxdist();
-    
-    std::cout << "Making map from filenames to features" << std::endl;
-    
-    filename_map.reserve(500000);
-    for(size_t i = 0; i < points.size(); i++) {
-        filename_map.insert(std::make_pair(filenames[i], i));
-    }
-    //std::cout << *cTree << std::endl;
-    
-    // find the nearest neighbor
-    ts = std::chrono::high_resolution_clock::now();
-    
-    //Serial search
-    std::string line;
-    while(std::getline(std::cin, line)) {
-        point feature = points[filename_map[line]];
+        std::ifstream filenames_file(filenames_path, std::ios::in);
+        if(!filenames_file) throw std::runtime_error("Filenames file not found: " + filenames_path);
+
+        filenames_map[region] = read_lines(filenames_file);
         
-        ts = std::chrono::high_resolution_clock::now();
-        std::vector<point> nearest = cTree->nearNeighbors(feature, 5);
-        tn = std::chrono::high_resolution_clock::now();
-        for(auto _p : nearest)
-            std::cout << filenames[_p.ident] << std::endl;
+        std::string points_path = r.get("data").get<std::string>();
         
-        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
-    }
-    /*
-    std::cout << "Querying serially" << std::endl;
-    for (const auto& queryPt : testPointList)
-    {
-        point& ct_nn = cTree->NearestNeighbour(queryPt);
+        points[region] = readPointFile(points_path);
+
+        auto ts = std::chrono::high_resolution_clock::now();
+       
+
+        ParallelMake pct(0, points[region].size(), points[region]);
+        pct.compute();
+                
+        cTree_map[region] = std::move(pct.get_result());
+       
+        auto tn = std::chrono::high_resolution_clock::now();
+        
+        std::cout << "Build time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
+        
+        cTree_map[region]->calc_maxdist();
+
+        std::cout << "Making map from filenames to features" << std::endl;
+
+        filename_reverse[region].reserve(300000);
+        for(size_t i = 0; i < points[region].size(); i++) {
+            filename_reverse[region].insert(std::make_pair(filenames_map[region][i], i));
+        }
+        
+        regions.push_back(region);
+        std::cout << region << std::endl;
     }
     
-    // Parallel search (async)
-    std::cout << "Quering parallely" << std::endl;
-    ts = std::chrono::high_resolution_clock::now();
-    parallel_for_each(testPointList.begin(), testPointList.end(), [&](point& queryPt)->void{
-        point& ct_nn = cTree->NearestNeighbourMulti(queryPt);
-        //point bf_nn = bruteForceNeighbor(pointList, queryPt);
-        //if (!ct_nn.isApprox(bf_nn))
-        //{
-        //	std::cout << "Something is wrong" << std::endl;
-        //	std::cout << ct_nn.format(CommaInitFmt) << " " << bf_nn.format(CommaInitFmt) << " " << queryPt.format(CommaInitFmt) << std::endl;
-        //	std::cout << (ct_nn - queryPt).norm() << " ";
-        //	std::cout << (bf_nn - queryPt).norm() << std::endl;
-        //}
-    });
-    tn = std::chrono::high_resolution_clock::now();
-    std::cout << "Query time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
-    std::cout << "k-NN serially" << std::endl;
-    ts = std::chrono::high_resolution_clock::now();
-    for (const auto& queryPt : testPointList)
-    {
-        std::vector<point> nnList = cTree->nearNeighbors(queryPt, 2);
-        nearNeighborBruteForce(pointList, queryPt, 2, nnList);
+    struct mg_mgr mgr;
+    struct mg_connection *nc;
+    
+    mg_mgr_init(&mgr, NULL);
+    nc = mg_bind(&mgr, argc[2], ev_handler);
+    mg_set_protocol_http_websocket(nc);
+    
+    /* For each new connection, execute ev_handler in a separate thread */
+    mg_enable_multithreading(nc);
+    
+    printf("Starting multi-threaded server on port %s\n", argc[2]);
+    for (;;) {
+        mg_mgr_poll(&mgr, 3000);
     }
-    tn = std::chrono::high_resolution_clock::now();
-    std::cout << "Query time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
     
-    std::cout << "range serially" << std::endl;
-    std::vector<point> nnList = cTree->rangeNeighbors(testPointList[0], 10);
-    rangeBruteForce(pointList, testPointList[0], 10, nnList);
+    mg_mgr_free(&mgr);
     
-    */
-    // Success
+    std::cout << "Ready" << std::endl;
     return 0;
 }
