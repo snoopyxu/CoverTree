@@ -258,7 +258,7 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
         } else {
             
             mg_printf(c, "HTTP/1.1 200 OK\r\n"
-                  "Content-Type: application/json\r\n"
+                  "Content-Type: text/html\r\n"
                   "Content-Length: 0\r\n"
                   );
             
