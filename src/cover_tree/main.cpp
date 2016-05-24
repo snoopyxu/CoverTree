@@ -203,7 +203,6 @@ struct query parse_query(std::string query_string) {
     if(q.limit > 100) q.limit = 100;
     q.level = std::stoi(split(token_pairs[2], '=')[1]);
     q.region = split(token_pairs[3], '=')[1];
-    std::cout << "region: " << q.region << std::endl;
     q.okay = true;
     return q;
 }
@@ -231,22 +230,18 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
                 
             } else {
                 
-                std::cout << q.filename << std::endl;
+                std::cout << q.filename;
                 std::string region = q.region;
                 size_t filename_idx = filename_reverse[region][q.filename];
                 point feature = points[region][filename_idx];
-                std::cout << "getting nearest" << std::endl;
                 std::vector<point> nearest = cTree_map[region]->nearNeighborsMulti(feature, q.limit);
-                std::cout << "about to pca" << std::endl;
                 std::vector<std::vector<float> > pca = pca_2(nearest);
-                std::cout << "formatting" << std::endl;
                 res = format_res(q.region, feature, nearest, pca);
-                std::cout << "done" << std::endl;
 
             }
             
             tn = std::chrono::high_resolution_clock::now();
-            std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
+            std::cout << " : " <<  std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << "ms" << std::endl;
             
             mg_printf(c,  "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json\r\n"
