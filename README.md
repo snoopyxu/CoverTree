@@ -1,4 +1,4 @@
-This is a fork of Manzil Zaheer's multithreaded [CoverTree](https://github.com/manzilzaheer/CoverTree) implementation, with modifications to stored feature-ids as well as features & an embedded [Mongoose](https://github.com/cesanta/mongoose) asynchronous HTTP server to enable queries to be made over HTTP.
+This is a fork of Manzil Zaheer's multithreaded [CoverTree](https://github.com/manzilzaheer/CoverTree) implementation, with modifications to store feature-ids as well as features & an embedded [Mongoose](https://github.com/cesanta/mongoose) asynchronous HTTP server to enable queries to be made over HTTP.
 
 To use, 
 
