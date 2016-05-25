@@ -1,71 +1,38 @@
-# Cover Trees
+This is a fork of Manzil Zaheer's multithreaded [CoverTree](https://github.com/manzilzaheer/CoverTree) implementation, with modifications to stored feature-ids as well as features & an embedded [Mongoose](https://github.com/cesanta/mongoose) asynchronous HTTP server to enable queries to be made over HTTP.
 
-We present a distributed and parallel extension and implementation of Cover Tree data structure for nearest neighbour search. The data structure was originally presented in and improved in:
+To use, 
 
-1. Alina Beygelzimer, Sham Kakade, and John Langford. "Cover trees for nearest neighbor." Proceedings of the 23rd international conference on Machine learning. ACM, 2006.
-2. Mike Izbicki and Christian Shelton. "Faster cover trees." Proceedings of the 32nd International Conference on Machine Learning (ICML-15). 2015.
- 
-Under active development
+1. Modify `config.json` so that the filepaths point to your list of filenames and your file of features, i.e
+```
+{"19" : [
+            {"region" : "<Name of this dataset>",
+             "data" : "<Filepath of data>",
+             "filenames" : "<List of filenames that correspond to the data>"},
+    
+            {"region" : "<Another dataset>",
+             "data" : "<Filepath of data>",
+             "filenames" : "<List of filenames that correspond to the data>"}
+        ]
+}
+```
 
-## Organisation
-1. All codes are under `src` within respective folder
-2. Dependencies are provided under `lib` folder
-3. For running cover tree an example script is provided under `scripts`
-4. `data` is a placeholder folder where to put the data
-5. `build` and `dist` folder will be created to hold the executables
+Currently, the datafile format is `<int number of points><int number of dimensions><array of doubles of point data>`. The file [data/convert.py](data/convert.py) converts a .t7 file that contains an array of feature-vectors into this format. You could also modify the [read_point_file](src/cover_tree/main.cpp) function to read your own data format, or trivially modify `convert.py` to convert a `.npy` to this format.
 
+2. `make` (if not already compiled)
+3. Run `dist/cover_tree <path to config.json> <port number to use for server>`
+
+The server responds to queries of the form:
+
+`<url of server>:<port>/?filename=<filename of feature>&limit=<number results to return>&level=19&region=<dataset name>`
 
 ## Requirements
-1. gcc >= 4.8.4 or Intel&reg; C++ Compiler 2016 for using C++11 features
+1. C++14 compiler
+2. OpenMP
+3. Optional: `torchfile` to use [convert.py](data/convert.py)
 
-## How to use
-We will show how to run our Cover Tree on a single machine using synthetic dataset
+## Libraries used
 
-1. First of all compile by hitting make
-
-   ```bash
-     make
-   ```
-
-2. Generate synthetic dataset
-
-   ```bash
-     python data/generateData.py
-   ```
-
-
-3. Run Cover Tree
-
-   ```bash
-      dist/cover_tree data/train_100d_1000k_1000.dat data/test_100d_1000k_10.dat
-   ```
-
-The make file has some useful features:
-
-- if you have Intel&reg; C++ Compiler, then you can instead
-
-   ```bash
-     make intel
-   ```
-
-- or if you want to use Intel&reg; C++ Compiler's cross-file optimization (ipo), then hit
-   
-   ```bash
-     make inteltogether
-   ```
-
-- Also you can selectively compile individual modules by specifying
-
-   ```bash
-     make <module-name>
-   ```
-
-- or clean individually by
-
-   ```bash
-     make clean-<module-name>
-   ```
-
-## Performance
-Based on our evaluation the implementation is easily scalable and efficient. For example on Amazon EC2 c4.8xlarge, we could insert more than 1 million vectors of 1000 dimensions in Euclidean space with L2 norm under 250 seconds. During query time we can process > 300 queries per second per core.
+* [Mongoose](https://github.com/cesanta/mongoose)
+* [Picojson](https://github.com/kazuho/picojson)
+* [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page)
 
