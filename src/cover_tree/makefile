@@ -12,8 +12,8 @@ INTEL_LFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -I"${MKLROOT}"/include -O3 -marc
 INTEL_TFLAGS = -I"$(CDIR)" -fast -DNDEBUG -std=c++14 -inline-factor=500 -no-inline-max-size -no-inline-max-total-size -use-intel-optimized-headers -parallel -qopt-prefetch=4 -qopt-mem-layout-trans=3 -pthread 
 
 GNU_CC = g++
-GNU_CFLAGS = $(DEBUG) -DMG_ENABLE_THREADS -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -ffloat-store -pthread -std=c++1y -fopenmp  -c
-GNU_LFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -ffloat-store -pthread -std=c++1y -fopenmp
+GNU_CFLAGS = $(DEBUG) -DMG_ENABLE_THREADS -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -pthread -std=c++1y -fopenmp  -c
+GNU_LFLAGS = $(DEBUG) -I"$(CDIR)" -I"$(IDIR)" -O3 -march=corei7 -pthread -std=c++1y -fopenmp
 
 CC = $(GNU_CC)
 CFLAGS = $(GNU_CFLAGS)

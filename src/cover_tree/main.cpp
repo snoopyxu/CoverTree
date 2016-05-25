@@ -27,11 +27,14 @@ struct query {
     bool okay;
 };
 
+typedef Eigen::MatrixXf Mattype;
+typedef Eigen::VectorXf Vectype;
+
 // map from region to filenames, points & c-trees
 std::unordered_map<std::string, std::unordered_map<std::string, size_t> > filename_reverse;
 std::unordered_map<std::string, std::vector<point> > points;
 std::unordered_map<std::string, std::vector<std::string> > filenames_map;
-std::unordered_map<std::string, CoverTree*> cTree_map;
+std::unordered_map<std::string, CoverTree*> cover_tree_map;
 
 std::vector<std::string> regions;
 
@@ -63,7 +66,6 @@ UnaryFunction parallel_for_each(InputIt first, InputIt last, UnaryFunction f)
 }
 
 std::vector<std::string> read_lines(std::ifstream& in_file) {
-    std::cout << "Reading filenames..." << std::endl;
     std::vector<std::string> res;
     std::string temp_line;
     size_t i = 0;
@@ -74,7 +76,7 @@ std::vector<std::string> read_lines(std::ifstream& in_file) {
     return res;
 }
 
-std::vector<point> readPointFile(std::string fileName)
+std::vector<point> read_point_file(std::string fileName)
 {
     std::ifstream fin(fileName, std::ios::in|std::ios::binary);
     
@@ -89,7 +91,7 @@ std::vector<point> readPointFile(std::string fileName)
     fin.read((char *)&numDims, sizeof(int));
     
     // Printing for debugging
-    std::cout << "\nNumber of points: " << numPoints << "\nNumber of dims : " << numDims << std::endl;
+    std::cout << "Number of points: " << numPoints << std::endl << "Number of dims : " << numDims << std::endl;
     
     // List of points
     std::vector<point> pointList;
@@ -97,15 +99,16 @@ std::vector<point> readPointFile(std::string fileName)
     
     // Read the points, one by one
     double value;
-    double *tmp_point = new double[numDims];
+    double tmp_point[numDims];
     for (size_t ptIter = 0; ptIter < numPoints; ptIter++)
     {
-        // new point to be read
         fin.read((char *)tmp_point, sizeof(double)*numDims);
+        // new point to be read
         point newPt;
-        newPt.pt = Eigen::VectorXd(numDims);
+        newPt.pt = Vectype(numDims);
         for (unsigned dim = 0; dim < numDims; dim++)
         {
+            if(ptIter % 100000 == 0 && dim == 0) std::cout << tmp_point[dim] << " ";
             newPt.pt[dim] = tmp_point[dim];
         }
         
@@ -122,26 +125,35 @@ std::vector<point> readPointFile(std::string fileName)
 }
 
 std::vector<std::vector<float> > pca_2(std::vector<point> results) {
-    Eigen::MatrixXd mat(512, results.size());
+    Mattype mat(512, results.size());
+    
     for(size_t i = 0; i < results.size(); ++i) {
         mat.col(i) = results[i].pt;//.transpose();
     }
-    Eigen::MatrixXd centered = mat.rowwise() - mat.colwise().mean();
-    Eigen::MatrixXd cov = centered.adjoint() * centered;
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eig(cov, Eigen::ComputeEigenvectors);
-    std::vector<std::vector<float > > res;
+    
+    Mattype centered = mat.rowwise() - mat.colwise().mean();
+    Mattype cov = centered.adjoint() * centered;
+    
+    Eigen::SelfAdjointEigenSolver<Mattype> eig(cov, Eigen::ComputeEigenvectors);
+    
+    std::vector<std::vector<float> > res;
     res.reserve(results.size());
-    Eigen::VectorXd v_1 = eig.eigenvectors().col(0);
-    Eigen::VectorXd v_2 = eig.eigenvectors().col(1);
-    v_1.normalize();
-    v_2.normalize();
+    
+    Vectype v_1 = eig.eigenvectors().col(0);
+    Vectype v_2 = eig.eigenvectors().col(1);
+    
+    std::cout << "V_1: " << v_1.rows() << " " << v_1.cols() << " : " << v_1.maxCoeff() << std::endl;
+    
+    v_1 /= (fabs(v_1.maxCoeff()));
+    v_2 /= (fabs(v_2.maxCoeff()));
+    
     for(size_t i = 0; i < results.size(); ++i) {
         std::vector<float> temp;
-        temp.reserve(2);
         temp.push_back(v_1(i));
         temp.push_back(v_2(i));
         res.push_back(temp);
     }
+    
     return res;
 }
 
@@ -197,13 +209,16 @@ struct query parse_query(std::string query_string) {
         q.okay = false;
         return q;
     }
-    
-    q.filename = split(token_pairs[0], '=')[1];
-    q.limit = std::stoi(split(token_pairs[1], '=')[1]);
-    if(q.limit > 100) q.limit = 100;
-    q.level = std::stoi(split(token_pairs[2], '=')[1]);
-    q.region = split(token_pairs[3], '=')[1];
-    q.okay = true;
+    try {
+        q.filename = split(token_pairs[0], '=')[1];
+        q.limit = std::stoi(split(token_pairs[1], '=')[1]);
+        if(q.limit > 100) q.limit = 100;
+        q.level = std::stoi(split(token_pairs[2], '=')[1]);
+        q.region = split(token_pairs[3], '=')[1];
+        q.okay = true;
+    } catch (std::invalid_argument& e) {
+        q.okay = false;
+    }       
     return q;
 }
 
@@ -216,14 +231,18 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
         struct mg_str query_buff = hm->query_string;
         
         if(query_buff.len != 0) {
+            
             std::chrono::high_resolution_clock::time_point ts, tn;
             ts = std::chrono::high_resolution_clock::now();
+            
             std::string res = "";
+            
             char query_str[query_buff.len + 1];          
             std::copy(query_buff.p, query_buff.p + query_buff.len, query_str);         
             query_str[query_buff.len] = '\0';
             
             struct query q = parse_query(query_str);
+            
             if(!q.okay) { 
                 
                 res = "{\"error\":\"malformed query\"}";
@@ -231,10 +250,13 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
             } else {
                 
                 std::cout << q.filename;
+                
                 std::string region = q.region;
                 size_t filename_idx = filename_reverse[region][q.filename];
                 point feature = points[region][filename_idx];
-                std::vector<point> nearest = cTree_map[region]->nearNeighborsMulti(feature, q.limit);
+                
+                std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
+                
                 std::vector<std::vector<float> > pca = pca_2(nearest);
                 res = format_res(q.region, feature, nearest, pca);
 
@@ -277,53 +299,52 @@ int main(int argv, char** argc)
     for(int i=0; i<2048; ++i)
         powdict[i] = pow(base, i-1024);
     
-//    Eigen::IOFormat CommaInitFmt(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", ", ", "", "", "[", "]");
     std::chrono::high_resolution_clock::time_point ts, tn;
     
-    // Reading the file for points
-    
+    // Read config file
     std::ifstream config_file(argc[1]);
     std::stringstream config_data;
     config_data << config_file.rdbuf();
+    
+    // Parse config file
     picojson::value config_json;
     std::string err = picojson::parse(config_json, config_data.str());
-    
-    //const picojson::object& config = config_json.get<picojson::object>();
-    std::cout << config_json.to_str() << std::endl;
+
     if (! err.empty()) {
       std::cerr << err << std::endl;
     }
     
+    picojson::array regions_config = config_json.get("19").get<picojson::array>();
     // Load data
 
-    picojson::array regions_config = config_json.get("19").get<picojson::array>();
     for(auto r : regions_config) {
         std::string region = r.get("region").get<std::string>();
         std::string filenames_path = r.get("filenames").get<std::string>();
         
         std::ifstream filenames_file(filenames_path, std::ios::in);
         if(!filenames_file) throw std::runtime_error("Filenames file not found: " + filenames_path);
-
+        
+        std::cout << "Building " << region << std::endl;
+        
         filenames_map[region] = read_lines(filenames_file);
         
         std::string points_path = r.get("data").get<std::string>();
         
-        points[region] = readPointFile(points_path);
+        points[region] = read_point_file(points_path);
 
         auto ts = std::chrono::high_resolution_clock::now();
        
-
         ParallelMake pct(0, points[region].size(), points[region]);
         pct.compute();
                 
-        cTree_map[region] = std::move(pct.get_result());
+        cover_tree_map[region] = std::move(pct.get_result());
+       
+        cover_tree_map[region]->calc_maxdist();
        
         auto tn = std::chrono::high_resolution_clock::now();
         
         std::cout << "Build time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
         
-        cTree_map[region]->calc_maxdist();
-
         std::cout << "Making map from filenames to features" << std::endl;
 
         filename_reverse[region].reserve(300000);
@@ -332,7 +353,7 @@ int main(int argv, char** argc)
         }
         
         regions.push_back(region);
-        std::cout << region << std::endl;
+        std::cout << std::endl;
     }
     
     struct mg_mgr mgr;

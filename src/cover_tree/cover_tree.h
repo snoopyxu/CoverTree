@@ -13,13 +13,16 @@
 #include <iostream>
 
 typedef struct { 
-    Eigen::VectorXd pt; 
+    Eigen::VectorXf pt; 
     size_t ident;
 } point;
 
+typedef float numeric;
+
 // Base to use for the calculations
-double base = 1.3;
-double powdict[2048];
+numeric base = 1.3f;
+numeric powdict[2048];
+
 
 //template<class point>
 class CoverTree
@@ -32,15 +35,15 @@ public:
 		point _p;						// point associated with the node
 		std::vector<Node*> children;				// list of children
 		int level;						// current level of the node
-		double maxdistUB;					// Upper bound of distance to any of descendants
-		double tempDist;
+		numeric maxdistUB;					// Upper bound of distance to any of descendants
+		numeric tempDist;
 		
-		double covdist()
+		numeric covdist()
 		{
 			return powdict[level + 1024]; //pow(base, level);
 		}
 
-		double sepdist()
+		numeric sepdist()
 		{
 			return powdict[level + 1023]; // pow(base, level - 1);
 		}
@@ -79,12 +82,12 @@ public:
 			children.push_back(pIns);
 		}
 		
-		double dist(const point& pp) const
+		numeric dist(const point& pp) const
 		{
 			return (_p.pt - pp.pt).norm();
 		}
 
-		double dist(Node* n) const
+		numeric dist(Node* n) const
 		{
 			return (_p.pt - n->_p.pt).norm();
 		}
@@ -204,7 +207,7 @@ protected:
 	
 	Node* NearestNeighbourMulti(Node* current, const point &p, Node* nn) const
 	{
-		double tempDist = nn->dist(p);
+		numeric tempDist = nn->dist(p);
 		if (current->dist(p) < tempDist)
 			nn = current;
 	
@@ -222,8 +225,8 @@ protected:
         // TODO: An efficient implementation ?
 		auto comp_x = [](Node* a, Node* b) { return a->tempDist < b->tempDist; };
         	
-		double curDist = current->tempDist;
-		double bestNow = nnList.back()->tempDist;
+		numeric curDist = current->tempDist;
+		numeric bestNow = nnList.back()->tempDist;
 		
 		if(curDist < bestNow)
 		{
@@ -249,8 +252,8 @@ protected:
 	{	
         // If the current node is eligible to get into the list
         // TODO: An efficient implementation ?
-                double curDist = current->dist(p);
-		double bestNow = nnList.back()->dist(p);
+        numeric curDist = current->dist(p);
+		numeric bestNow = nnList.back()->dist(p);
 		
 		if(curDist < bestNow)
 		{
@@ -268,7 +271,7 @@ protected:
 	}
 	
 	
-	void rangeNeighbors(Node* current, const point &p, double range, std::vector<Node*>& nnList) const
+	void rangeNeighbors(Node* current, const point &p, numeric range, std::vector<Node*>& nnList) const
 	{	
         // If the current node is eligible to get into the list
 		if (current->tempDist < range)
@@ -286,7 +289,7 @@ protected:
 		}
 	}
 	
-	void rangeNeighborsMulti(Node* current, const point &p, double range, std::vector<Node*>& nnList) const
+	void rangeNeighborsMulti(Node* current, const point &p, numeric range, std::vector<Node*>& nnList) const
 	{	
 		// If the current node is eligible to get into the list
 		if (current->dist(p) < range)
@@ -431,7 +434,7 @@ public:
 
         // Do the worst initialization
         Node* dummyNode = new Node();
-        dummyNode->tempDist = std::numeric_limits<double>::max();
+        dummyNode->tempDist = std::numeric_limits<numeric>::max();
         // List of k-nearest points till now
         std::vector<Node*> nnListn(numNbrs, dummyNode);
 	nearNeighbors(root, queryPt, nnListn);
@@ -445,8 +448,8 @@ public:
 	{
         // Do the worst initialization
         Node* dummyNode = new Node();
-        dummyNode->_p.pt = 1e100*root->_p.pt;
-        dummyNode->tempDist = std::numeric_limits<double>::max();
+        dummyNode->_p.pt = std::numeric_limits<numeric>::max()*root->_p.pt;
+        dummyNode->tempDist = std::numeric_limits<numeric>::max();
         // List of k-nearest points till now
         std::vector<Node*> nnListn(numNbrs, dummyNode);
 		nearNeighborsMulti(root, queryPt, nnListn);
@@ -458,7 +461,7 @@ public:
 	}
 
     // Function to get the neighbors around the range
-	std::vector<point> rangeNeighbors(const point queryPt, double range) const
+	std::vector<point> rangeNeighbors(const point queryPt, numeric range) const
     {
         root->tempDist = root->dist(queryPt);
         // List of nearest neighbors in the range
@@ -472,7 +475,7 @@ public:
     }
 	
 	// Function to get the neighbors around the range
-	std::vector<point> rangeNeighborsMulti(const point queryPt, double range) const
+	std::vector<point> rangeNeighborsMulti(const point queryPt, numeric range) const
     {
         // List of nearest neighbors in the range
         std::vector<Node*> nnListn;;
