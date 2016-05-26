@@ -7,6 +7,7 @@
 # include <Eigen/Eigenvalues> 
 # include <string>
 # include <array>
+# include <map>
 # include <unordered_map>
 # include <picojson.h>
 
@@ -18,6 +19,8 @@ extern "C" {
 // User header
 # include "cover_tree.h"
 # include "parallel_cover_tree.h"
+
+#define MAX_QUERY_BYTE_LEN (200)
 
 struct query {
     std::string filename;
@@ -31,10 +34,10 @@ typedef Eigen::MatrixXf Mattype;
 typedef Eigen::VectorXf Vectype;
 
 // map from region to filenames, points & c-trees
-std::unordered_map<std::string, std::unordered_map<std::string, size_t> > filename_reverse;
-std::unordered_map<std::string, std::vector<point> > points;
-std::unordered_map<std::string, std::vector<std::string> > filenames_map;
-std::unordered_map<std::string, CoverTree*> cover_tree_map;
+std::map<std::string, std::unordered_map<std::string, size_t> > filename_reverse;
+std::map<std::string, std::vector<point> > points;
+std::map<std::string, std::vector<std::string> > filenames_map;
+std::map<std::string, CoverTree*> cover_tree_map;
 
 std::vector<std::string> regions;
 
@@ -109,7 +112,7 @@ std::vector<point> read_point_file(std::string fileName)
         for (unsigned dim = 0; dim < numDims; dim++)
         {
             if(ptIter % 100000 == 0 && dim == 0) std::cout << tmp_point[dim] << " ";
-            newPt.pt[dim] = tmp_point[dim];
+            newPt.pt[dim] = (float)tmp_point[dim];
         }
         
         newPt.ident = ptIter;
@@ -124,6 +127,7 @@ std::vector<point> read_point_file(std::string fileName)
     return pointList;
 }
 
+// PCA to 2 dims
 std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     Mattype mat(512, results.size());
     
@@ -141,9 +145,7 @@ std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     
     Vectype v_1 = eig.eigenvectors().col(0);
     Vectype v_2 = eig.eigenvectors().col(1);
-    
-    std::cout << "V_1: " << v_1.rows() << " " << v_1.cols() << " : " << v_1.maxCoeff() << std::endl;
-    
+        
     v_1 /= (fabs(v_1.maxCoeff()));
     v_2 /= (fabs(v_2.maxCoeff()));
     
@@ -160,7 +162,8 @@ std::vector<std::vector<float> > pca_2(std::vector<point> results) {
 std::string format_res(std::string region, 
                        point& search_feature, 
                        std::vector<point> &similar_features,
-                       std::vector<std::vector<float> > pca) {
+                       std::vector<std::vector<float> > pca,
+                       float duration) {
     
     std::vector<std::string> res_filenames(similar_features.size());
     std::vector<float> distances(similar_features.size());
@@ -170,8 +173,11 @@ std::string format_res(std::string region,
         res_filenames[i] = filenames_map[region][f.ident];
         distances[i] = (search_feature.pt - f.pt).norm();
     }
+    
+    // TODO: use a library for this!!
+    
     std::ostringstream ss;
-    ss << "{\"duration\":0.5,\"matches\":[";
+    ss << "{\"duration\":" << duration << ",\"matches\":[";
     size_t penultimate = res_filenames.size() - 1;
     for(size_t i = 0 ; i < res_filenames.size(); ++i) {
         std::vector<float>& curr_pca = pca[i];
@@ -182,7 +188,7 @@ std::string format_res(std::string region,
         if(i != penultimate) ss << ",";
     }
     ss << "],";
-    ss << "\"features_filename\":\"a\"";
+    ss << "\"features_filename\":\"" << region << "_z19.dat\"";
     ss << "}";
     return ss.str();
 }
@@ -197,24 +203,55 @@ std::vector<std::string> split(const std::string &s, char delim) {
     return tokens;
 }
 
+std::map<std::string, std::string> query_to_map(const std::string query) {
+    std::map<std::string, std::string> res;
+    std::ostringstream curr_key;
+    std::ostringstream curr_val;
+    bool in_key = true;
+    size_t i = 0;
+    for(const auto& s : query) {
+        if(s == '=') {
+            in_key = false;
+        } else if (s == '&') {
+            in_key = true;
+            res[curr_key.str()] = curr_val.str();
+            curr_key.str("");
+            curr_val.str("");
+            curr_key.clear();
+            curr_val.clear();
+        } else {
+            if(in_key) {
+                curr_key << s;
+            } else {
+                curr_val << s;
+            }
+        }
+        ++i;
+        if(i > MAX_QUERY_BYTE_LEN) break;
+    }
+    res[curr_key.str()] = curr_val.str();
+    return res;
+}
+
+
 bool is_valid_region(std::string region) {
     return std::find(regions.begin(), regions.end(), region) != regions.end();
 }
 
 struct query parse_query(std::string query_string) {
-    std::vector<std::string> token_pairs = split(query_string, '&');
+    std::map<std::string, std::string> query_map = query_to_map(query_string);
     struct query q;
-    if(token_pairs.size() != 4 
-      || !is_valid_region(split(token_pairs[3], '=')[1])) {
+    if(!(3 <= query_map.size() && query_map.size() <= 4) //only filename, limit & region required
+       || !is_valid_region(query_map["region"])
+       || query_map["filename"] == "") {
         q.okay = false;
         return q;
     }
     try {
-        q.filename = split(token_pairs[0], '=')[1];
-        q.limit = std::stoi(split(token_pairs[1], '=')[1]);
+        q.filename = query_map["filename"];
+        q.limit = std::stoi(query_map["limit"]);
         if(q.limit > 100) q.limit = 100;
-        q.level = std::stoi(split(token_pairs[2], '=')[1]);
-        q.region = split(token_pairs[3], '=')[1];
+        q.region = query_map["region"];
         q.okay = true;
     } catch (std::invalid_argument& e) {
         q.okay = false;
@@ -225,15 +262,12 @@ struct query parse_query(std::string query_string) {
 static void ev_handler(struct mg_connection *c, int ev, void *p) {
     
     if (ev == MG_EV_HTTP_REQUEST) {
-        
+  
         struct http_message *hm = (struct http_message *) p;
-
         struct mg_str query_buff = hm->query_string;
         
         if(query_buff.len != 0) {
-            
-            std::chrono::high_resolution_clock::time_point ts, tn;
-            ts = std::chrono::high_resolution_clock::now();
+            auto ts = std::chrono::high_resolution_clock::now();
             
             std::string res = "";
             
@@ -258,12 +292,16 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
                 std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
                 
                 std::vector<std::vector<float> > pca = pca_2(nearest);
-                res = format_res(q.region, feature, nearest, pca);
+                
+                auto tn = std::chrono::high_resolution_clock::now();
+                
+                float time_taken = (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count())/1000.0f;
+                res = format_res(q.region, feature, nearest, pca, time_taken);
 
             }
-            
-            tn = std::chrono::high_resolution_clock::now();
-            std::cout << " : " <<  std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << "ms" << std::endl;
+            auto tn = std::chrono::high_resolution_clock::now();
+            std::cout << " : " << (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count());
+            std::cout << "ms" << std::endl;
             
             mg_printf(c,  "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json\r\n"
@@ -338,13 +376,11 @@ int main(int argv, char** argc)
         pct.compute();
                 
         cover_tree_map[region] = std::move(pct.get_result());
-       
         cover_tree_map[region]->calc_maxdist();
        
         auto tn = std::chrono::high_resolution_clock::now();
         
         std::cout << "Build time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
-        
         std::cout << "Making map from filenames to features" << std::endl;
 
         filename_reverse[region].reserve(300000);
