@@ -130,10 +130,11 @@ std::vector<point> read_point_file(std::string fileName)
 // PCA to 2 dims
 std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     Mattype mat(512, results.size());
-    
+    std::cout << "1" <<std::endl;
     for(size_t i = 0; i < results.size(); ++i) {
-        mat.col(i) = results[i].pt;//.transpose();
+        mat.col(i) = results[i].pt;
     }
+    std::cout << "2" <<std::endl;
     
     Mattype centered = mat.rowwise() - mat.colwise().mean();
     Mattype cov = centered.adjoint() * centered;
@@ -143,16 +144,15 @@ std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     std::vector<std::vector<float> > res;
     res.reserve(results.size());
     
-    Vectype v_1 = eig.eigenvectors().col(0);
-    Vectype v_2 = eig.eigenvectors().col(1);
-        
+    std::cout << "3" <<std::endl;
+    Mattype v_1 = eig.eigenvectors().rightCols<2>();
+      
     v_1 /= (fabs(v_1.maxCoeff()));
-    v_2 /= (fabs(v_2.maxCoeff()));
     
     for(size_t i = 0; i < results.size(); ++i) {
         std::vector<float> temp;
-        temp.push_back(v_1(i));
-        temp.push_back(v_2(i));
+        temp.push_back(v_1(i, 0));
+        temp.push_back(v_1(i, 1));
         res.push_back(temp);
     }
     
@@ -250,7 +250,7 @@ struct query parse_query(std::string query_string) {
     try {
         q.filename = query_map["filename"];
         q.limit = std::stoi(query_map["limit"]);
-        if(q.limit > 100) q.limit = 100;
+        if(q.limit > 100 || q.limit < 2) q.limit = 100;
         q.region = query_map["region"];
         q.okay = true;
     } catch (std::invalid_argument& e) {
