@@ -130,11 +130,10 @@ std::vector<point> read_point_file(std::string fileName)
 // PCA to 2 dims
 std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     Mattype mat(512, results.size());
-    std::cout << "1" <<std::endl;
+
     for(size_t i = 0; i < results.size(); ++i) {
         mat.col(i) = results[i].pt;
     }
-    std::cout << "2" <<std::endl;
     
     Mattype centered = mat.rowwise() - mat.colwise().mean();
     Mattype cov = centered.adjoint() * centered;
@@ -144,7 +143,6 @@ std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     std::vector<std::vector<float> > res;
     res.reserve(results.size());
     
-    std::cout << "3" <<std::endl;
     Mattype v_1 = eig.eigenvectors().rightCols<2>();
       
     v_1 /= (fabs(v_1.maxCoeff()));
