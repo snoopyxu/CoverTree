@@ -128,11 +128,12 @@ std::vector<point> read_point_file(std::string fileName)
 }
 
 // PCA to 2 dims
-std::vector<std::vector<float> > pca_2(std::vector<point> results) {
+std::vector<std::vector<float> > pca_2(const std::vector<point>& results) {
     Mattype mat(512, results.size());
 
     for(size_t i = 0; i < results.size(); ++i) {
         mat.col(i) = results[i].pt;
+        mat.col(i).normalize();
     }
     
     Mattype centered = mat.rowwise() - mat.colwise().mean();
@@ -143,14 +144,26 @@ std::vector<std::vector<float> > pca_2(std::vector<point> results) {
     std::vector<std::vector<float> > res;
     res.reserve(results.size());
     
-    Mattype v_1 = eig.eigenvectors().rightCols<2>();
-      
-    v_1 /= (fabs(v_1.maxCoeff()));
+    Vectype v_1 = eig.eigenvectors().col(results.size()-1); // Last 2 cols
+    Vectype v_2 = eig.eigenvectors().col(results.size()-2);
+    std::cout << std::endl << v_1.maxCoeff() << " " << v_1.minCoeff() << std::endl;
+    std::cout << v_2.maxCoeff() << " " << v_2.minCoeff() << std::endl;
+
+    v_1.array() -= v_1.minCoeff();
+    v_2.array() -= v_2.minCoeff();
+    v_1 /= v_1.maxCoeff();// - v_1.minCoeff(); 
+    v_2 /= v_2.maxCoeff();// - v_2.minCoeff();
+    v_1.array() *= 2;
+    v_1.array() -= 1;
+    v_2.array() *= 2;
+    v_2.array() -= 1;
     
+    std::cout << v_1.maxCoeff() << " " << v_1.minCoeff() << std::endl;
+    std::cout << v_2.maxCoeff() << " " << v_2.minCoeff() << std::endl;
     for(size_t i = 0; i < results.size(); ++i) {
         std::vector<float> temp;
-        temp.push_back(v_1(i, 0));
-        temp.push_back(v_1(i, 1));
+        temp.push_back(v_1(i));
+        temp.push_back(v_2(i));
         res.push_back(temp);
     }
     
