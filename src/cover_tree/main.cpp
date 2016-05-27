@@ -10,6 +10,7 @@
 # include <map>
 # include <unordered_map>
 # include <picojson.h>
+# include <vp-tree.h>
 
 extern "C" {
     # include "mongoose.h"
@@ -30,6 +31,10 @@ struct query {
     bool okay;
 };
 
+float vp_dist(const point& x, const point& y) {
+    return (x.pt - y.pt).norm();
+}
+
 typedef Eigen::MatrixXf Mattype;
 typedef Eigen::VectorXf Vectype;
 
@@ -38,7 +43,7 @@ std::map<std::string, std::unordered_map<std::string, size_t> > filename_reverse
 std::map<std::string, std::vector<point> > points;
 std::map<std::string, std::vector<std::string> > filenames_map;
 std::map<std::string, CoverTree*> cover_tree_map;
-
+std::map<std::string, VpTree<point, &vp_dist>*> vp_tree_map;
 std::vector<std::string> regions;
 
 template<class InputIt, class UnaryFunction>
@@ -133,7 +138,7 @@ std::vector<std::vector<float> > pca_2(const std::vector<point>& results) {
 
     for(size_t i = 0; i < results.size(); ++i) {
         mat.col(i) = results[i].pt;
-        mat.col(i).normalize();
+//        mat.col(i).normalize();
     }
     
     Mattype centered = mat.rowwise() - mat.colwise().mean();
@@ -144,26 +149,26 @@ std::vector<std::vector<float> > pca_2(const std::vector<point>& results) {
     std::vector<std::vector<float> > res;
     res.reserve(results.size());
     
-    Vectype v_1 = eig.eigenvectors().col(results.size()-1); // Last 2 cols
-    Vectype v_2 = eig.eigenvectors().col(results.size()-2);
-    std::cout << std::endl << v_1.maxCoeff() << " " << v_1.minCoeff() << std::endl;
-    std::cout << v_2.maxCoeff() << " " << v_2.minCoeff() << std::endl;
+    Mattype v_1 = eig.eigenvectors().rightCols(2); // Last 2 cols
+    //Vectype v_2 = eig.eigenvectors().col(results.size()-2);
+    std::cout << std::endl << v_1.col(0).maxCoeff() << " " << v_1.col(0).minCoeff() << std::endl;
+    std::cout << v_1.col(1).maxCoeff() << " " << v_1.col(1).minCoeff() << std::endl;
 
-    v_1.array() -= v_1.minCoeff();
-    v_2.array() -= v_2.minCoeff();
-    v_1 /= v_1.maxCoeff();// - v_1.minCoeff(); 
-    v_2 /= v_2.maxCoeff();// - v_2.minCoeff();
-    v_1.array() *= 2;
-    v_1.array() -= 1;
-    v_2.array() *= 2;
-    v_2.array() -= 1;
+    v_1.col(0).array() -= v_1.col(0).minCoeff();
+    v_1.col(1).array() -= v_1.col(1).minCoeff();
+    v_1.col(0) /= v_1.col(0).maxCoeff();// - v_1.minCoeff(); 
+    v_1.col(1) /= v_1.col(1).maxCoeff();// - v_1.minCoeff(); 
+    v_1.col(0).array() *= 2;
+    v_1.col(0).array() -= 1;
+    v_1.col(1).array() *= 2;
+    v_1.col(1).array() -= 1;
     
-    std::cout << v_1.maxCoeff() << " " << v_1.minCoeff() << std::endl;
-    std::cout << v_2.maxCoeff() << " " << v_2.minCoeff() << std::endl;
+    std::cout << v_1.col(0).maxCoeff() << " " << v_1.col(0).minCoeff() << std::endl;
+    std::cout << v_1.col(1).maxCoeff() << " " << v_1.col(1).minCoeff() << std::endl;
     for(size_t i = 0; i < results.size(); ++i) {
         std::vector<float> temp;
-        temp.push_back(v_1(i));
-        temp.push_back(v_2(i));
+        temp.push_back(v_1(i, 0));
+        temp.push_back(v_1(i, 1));
         res.push_back(temp);
     }
     
@@ -300,7 +305,12 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
                 size_t filename_idx = filename_reverse[region][q.filename];
                 point feature = points[region][filename_idx];
                 
-                std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
+                //std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
+                
+                std::vector<point> nearest(q.limit);
+                std::vector<float> distances;
+                
+                vp_tree_map[region]->search(feature, q.limit, &nearest, &distances);
                 
                 std::vector<std::vector<float> > pca = pca_2(nearest);
                 
@@ -383,11 +393,14 @@ int main(int argv, char** argc)
 
         auto ts = std::chrono::high_resolution_clock::now();
        
-        ParallelMake pct(0, points[region].size(), points[region]);
+        /*ParallelMake pct(0, points[region].size(), points[region]);
         pct.compute();
                 
         cover_tree_map[region] = std::move(pct.get_result());
-        cover_tree_map[region]->calc_maxdist();
+        cover_tree_map[region]->calc_maxdist();*/
+        VpTree<point, &vp_dist>* vp_tree = new VpTree<point, &vp_dist>();
+        vp_tree->create(points[region]);
+        vp_tree_map[region] = vp_tree;        
        
         auto tn = std::chrono::high_resolution_clock::now();
         
