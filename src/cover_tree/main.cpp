@@ -4,7 +4,7 @@
 # include <iostream>
 # include <exception>
 # include <Eigen/Core>
-# include <Eigen/Eigenvalues> 
+# include <Eigen/Eigenvalues>
 # include <string>
 # include <array>
 # include <map>
@@ -50,12 +50,12 @@ template<class InputIt, class UnaryFunction>
 UnaryFunction parallel_for_each(InputIt first, InputIt last, UnaryFunction f)
 {
     unsigned cores = std::thread::hardware_concurrency();
-    
+
     auto task = [&f](InputIt start, InputIt end)->void{
         for (; start < end; ++start)
             f(*start);
     };
-    
+
     const size_t total_length = std::distance(first, last);
     const size_t chunk_length = total_length / cores;
     InputIt chunk_start = first;
@@ -67,7 +67,7 @@ UnaryFunction parallel_for_each(InputIt first, InputIt last, UnaryFunction f)
         chunk_start = chunk_stop;
     }
     for_threads.push_back(std::async(std::launch::async, task, chunk_start, last));
-    
+
     for (auto& thread : for_threads)
         thread.get();
     return f;
@@ -87,24 +87,24 @@ std::vector<std::string> read_lines(std::ifstream& in_file) {
 std::vector<point> read_point_file(std::string fileName)
 {
     std::ifstream fin(fileName, std::ios::in|std::ios::binary);
-    
+
     // Check for existance for file
     if (!fin)
         throw std::runtime_error("File not found : " + fileName);
-    
+
     // Read the header for number of points, dimensions
     unsigned numPoints = 0;
     unsigned numDims = 0;
     fin.read((char *)&numPoints, sizeof(int));
     fin.read((char *)&numDims, sizeof(int));
-    
+
     // Printing for debugging
     std::cout << "Number of points: " << numPoints << std::endl << "Number of dims : " << numDims << std::endl;
-    
+
     // List of points
     std::vector<point> pointList;
     pointList.reserve(numPoints);
-    
+
     // Read the points, one by one
     double value;
     double tmp_point[numDims];
@@ -119,36 +119,36 @@ std::vector<point> read_point_file(std::string fileName)
             if(ptIter % 100000 == 0 && dim == 0) std::cout << tmp_point[dim] << " ";
             newPt.pt[dim] = (float)tmp_point[dim];
         }
-        
+
         newPt.ident = ptIter;
         // Add the point to the list
         pointList.push_back(newPt);
     }
     // Close the file
     fin.close();
-    
+
     std::cout<<pointList[0].pt[0] << " " << pointList[0].pt[1] << " " << pointList[1].pt[0] << std::endl;
-    
+
     return pointList;
 }
 
 // PCA to 2 dims
 std::vector<std::vector<float> > pca_2(const std::vector<point>& results) {
-    Mattype mat(512, results.size());
+    Mattype mat(4096, results.size());
 
     for(size_t i = 0; i < results.size(); ++i) {
         mat.col(i) = results[i].pt;
 //        mat.col(i).normalize();
     }
-    
+
     Mattype centered = mat.rowwise() - mat.colwise().mean();
     Mattype cov = centered.adjoint() * centered;
-    
+
     Eigen::SelfAdjointEigenSolver<Mattype> eig(cov, Eigen::ComputeEigenvectors);
-    
+
     std::vector<std::vector<float> > res;
     res.reserve(results.size());
-    
+
     Mattype v_1 = eig.eigenvectors().rightCols(2); // Last 2 cols
     //Vectype v_2 = eig.eigenvectors().col(results.size()-2);
     std::cout << std::endl << v_1.col(0).maxCoeff() << " " << v_1.col(0).minCoeff() << std::endl;
@@ -156,13 +156,13 @@ std::vector<std::vector<float> > pca_2(const std::vector<point>& results) {
 
     v_1.col(0).array() -= v_1.col(0).minCoeff();
     v_1.col(1).array() -= v_1.col(1).minCoeff();
-    v_1.col(0) /= v_1.col(0).maxCoeff();// - v_1.minCoeff(); 
-    v_1.col(1) /= v_1.col(1).maxCoeff();// - v_1.minCoeff(); 
+    v_1.col(0) /= v_1.col(0).maxCoeff();// - v_1.minCoeff();
+    v_1.col(1) /= v_1.col(1).maxCoeff();// - v_1.minCoeff();
     v_1.col(0).array() *= 2;
     v_1.col(0).array() -= 1;
     v_1.col(1).array() *= 2;
     v_1.col(1).array() -= 1;
-    
+
     std::cout << v_1.col(0).maxCoeff() << " " << v_1.col(0).minCoeff() << std::endl;
     std::cout << v_1.col(1).maxCoeff() << " " << v_1.col(1).minCoeff() << std::endl;
     for(size_t i = 0; i < results.size(); ++i) {
@@ -171,27 +171,27 @@ std::vector<std::vector<float> > pca_2(const std::vector<point>& results) {
         temp.push_back(v_1(i, 1));
         res.push_back(temp);
     }
-    
+
     return res;
 }
 
-std::string format_res(std::string region, 
-                       point& search_feature, 
+std::string format_res(std::string region,
+                       point& search_feature,
                        std::vector<point> &similar_features,
                        std::vector<std::vector<float> > pca,
                        float duration) {
-    
+
     std::vector<std::string> res_filenames(similar_features.size());
     std::vector<float> distances(similar_features.size());
-    
+
     for(size_t i = 0; i < res_filenames.size(); ++i) {
         point& f = similar_features[i];
         res_filenames[i] = filenames_map[region][f.ident];
         distances[i] = (search_feature.pt - f.pt).norm();
     }
-    
+
     // TODO: use a library for this!!
-    
+
     std::ostringstream ss;
     ss << "{\"duration\":" << duration << ",\"matches\":[";
     size_t penultimate = res_filenames.size() - 1;
@@ -204,7 +204,7 @@ std::string format_res(std::string region,
         if(i != penultimate) ss << ",";
     }
     ss << "],";
-    ss << "\"features_filename\":\"" << region << "_z19.dat\"";
+    ss << "\"features_filename\":\"" << region << "_z18.dat\"";
     ss << "}";
     return ss.str();
 }
@@ -271,51 +271,51 @@ struct query parse_query(std::string query_string) {
         q.okay = true;
     } catch (std::invalid_argument& e) {
         q.okay = false;
-    }       
+    }
     return q;
 }
 
 static void ev_handler(struct mg_connection *c, int ev, void *p) {
-    
+
     if (ev == MG_EV_HTTP_REQUEST) {
-  
+
         struct http_message *hm = (struct http_message *) p;
         struct mg_str query_buff = hm->query_string;
-        
+
         if(query_buff.len != 0) {
             auto ts = std::chrono::high_resolution_clock::now();
-            
+
             std::string res = "";
-            
-            char query_str[query_buff.len + 1];          
-            std::copy(query_buff.p, query_buff.p + query_buff.len, query_str);         
+
+            char query_str[query_buff.len + 1];
+            std::copy(query_buff.p, query_buff.p + query_buff.len, query_str);
             query_str[query_buff.len] = '\0';
-            
+
             struct query q = parse_query(query_str);
-            
-            if(!q.okay) { 
-                
+
+            if(!q.okay) {
+
                 res = "{\"error\":\"malformed query\"}";
-                
+
             } else {
-                
+
                 std::cout << q.filename;
-                
+
                 std::string region = q.region;
                 size_t filename_idx = filename_reverse[region][q.filename];
                 point feature = points[region][filename_idx];
-                
+
                 //std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
-                
+
                 std::vector<point> nearest(q.limit);
                 std::vector<float> distances;
-                
+
                 vp_tree_map[region]->search(feature, q.limit, &nearest, &distances);
-                
+
                 std::vector<std::vector<float> > pca = pca_2(nearest);
-                
+
                 auto tn = std::chrono::high_resolution_clock::now();
-                
+
                 float time_taken = (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count())/1000.0f;
                 res = format_res(q.region, feature, nearest, pca, time_taken);
 
@@ -323,7 +323,7 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
             auto tn = std::chrono::high_resolution_clock::now();
             std::cout << " : " << (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count());
             std::cout << "ms" << std::endl;
-            
+
             mg_printf(c,  "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json\r\n"
                           "Content-Length: %d\r\n"
@@ -331,15 +331,15 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
                           "%s",
                           (int) res.length(), res.c_str());
             c->flags |= MG_F_SEND_AND_CLOSE;
-            
+
         } else {
-            
+
             mg_printf(c, "HTTP/1.1 200 OK\r\n"
                   "Content-Type: application/json\r\n"
                   "Content-Length: 0\r\n"
                   );
             c->flags |= MG_F_SEND_AND_CLOSE;
-            
+
         }
     }
 }
@@ -348,23 +348,23 @@ int main(int argv, char** argc)
 {
     if (argv < 2)
         throw std::runtime_error("Usage:\n./main <path to config file> <port>");
-    
+
     std::cout << "config path: " <<  argc[1] << std::endl;
     std::cout << "port number: " <<  argc[2] << std::endl;
-    
+
     Eigen::initParallel();
     std::cout << "Number of OpenMP threads: " << Eigen::nbThreads() << std::endl;
-    
+
     for(int i=0; i<2048; ++i)
         powdict[i] = pow(base, i-1024);
-    
+
     std::chrono::high_resolution_clock::time_point ts, tn;
-    
+
     // Read config file
     std::ifstream config_file(argc[1]);
     std::stringstream config_data;
     config_data << config_file.rdbuf();
-    
+
     // Parse config file
     picojson::value config_json;
     std::string err = picojson::parse(config_json, config_data.str());
@@ -372,38 +372,38 @@ int main(int argv, char** argc)
     if (! err.empty()) {
       std::cerr << err << std::endl;
     }
-    
-    picojson::array regions_config = config_json.get("19").get<picojson::array>();
+
+    picojson::array regions_config = config_json.get("18").get<picojson::array>();
     // Load data
 
     for(auto r : regions_config) {
         std::string region = r.get("region").get<std::string>();
         std::string filenames_path = r.get("filenames").get<std::string>();
-        
+
         std::ifstream filenames_file(filenames_path, std::ios::in);
         if(!filenames_file) throw std::runtime_error("Filenames file not found: " + filenames_path);
-        
+
         std::cout << "Building " << region << std::endl;
-        
+
         filenames_map[region] = read_lines(filenames_file);
-        
+
         std::string points_path = r.get("data").get<std::string>();
-        
+
         points[region] = read_point_file(points_path);
 
         auto ts = std::chrono::high_resolution_clock::now();
-       
+
         /*ParallelMake pct(0, points[region].size(), points[region]);
         pct.compute();
-                
+
         cover_tree_map[region] = std::move(pct.get_result());
         cover_tree_map[region]->calc_maxdist();*/
         VpTree<point, &vp_dist>* vp_tree = new VpTree<point, &vp_dist>();
         vp_tree->create(points[region]);
-        vp_tree_map[region] = vp_tree;        
-       
+        vp_tree_map[region] = vp_tree;
+
         auto tn = std::chrono::high_resolution_clock::now();
-        
+
         std::cout << "Build time: " << std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count() << std::endl;
         std::cout << "Making map from filenames to features" << std::endl;
 
@@ -411,28 +411,28 @@ int main(int argv, char** argc)
         for(size_t i = 0; i < points[region].size(); i++) {
             filename_reverse[region].insert(std::make_pair(filenames_map[region][i], i));
         }
-        
+
         regions.push_back(region);
         std::cout << std::endl;
     }
-    
+
     struct mg_mgr mgr;
     struct mg_connection *nc;
-    
+
     mg_mgr_init(&mgr, NULL);
     nc = mg_bind(&mgr, argc[2], ev_handler);
     mg_set_protocol_http_websocket(nc);
-    
+
     /* For each new connection, execute ev_handler in a separate thread */
     mg_enable_multithreading(nc);
-    
+
     printf("Starting multi-threaded server on port %s\n", argc[2]);
     for (;;) {
         mg_mgr_poll(&mgr, 3000);
     }
-    
+
     mg_mgr_free(&mgr);
-    
+
     std::cout << "Ready" << std::endl;
     return 0;
 }
