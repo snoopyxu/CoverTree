@@ -326,6 +326,7 @@ static void ev_handler(struct mg_connection *c, int ev, void *p) {
 
             mg_printf(c,  "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
                           "Content-Length: %d\r\n"
                           "\r\n"
                           "%s",
