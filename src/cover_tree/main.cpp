@@ -11,6 +11,9 @@
 # include <unordered_map>
 # include <picojson.h>
 # include <vp-tree.h>
+#include "rapidjson/document.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
 
 extern "C" {
     # include "mongoose.h"
@@ -275,72 +278,155 @@ struct query parse_query(std::string query_string) {
     return q;
 }
 
-static void ev_handler(struct mg_connection *c, int ev, void *p) {
+static void handle_similar_call_v2(struct mg_connection *c, struct http_message *hm) {
+    auto ts = std::chrono::high_resolution_clock::now();
+    char n1[100], n2[100];
+    char n3[40960];
 
-    if (ev == MG_EV_HTTP_REQUEST) {
+    /* Get form variables */
+    mg_get_http_var(&hm->body, "limit", n1, sizeof(n1));
+    mg_get_http_var(&hm->body, "region", n2, sizeof(n2));
+    mg_get_http_var(&hm->body, "feature", n3, sizeof(n3));
 
-        struct http_message *hm = (struct http_message *) p;
-        struct mg_str query_buff = hm->query_string;
+    //std::cout << n1 << std::endl;
+    //std::cout << n2 << std::endl;
+    //std::cout << n3 << std::endl;
+    int limits = strtod(n1, NULL);
+    std::string region = n2;
 
-        if(query_buff.len != 0) {
-            auto ts = std::chrono::high_resolution_clock::now();
+    point feature;
+    feature.pt = Vectype(4096);
+    //feature.ident = ptIter;
 
-            std::string res = "";
+    rapidjson::Document document;
+    bool parse_success = false;
+    if (!document.Parse<0>(n3).HasParseError()) {
+        if (document.IsObject() && document.HasMember("feature")) {
+            const rapidjson::Value& feat_val = document["feature"];
+            if (feat_val.IsArray()) {
+                //if (feat_val.Size() == 4096) {
+                    std::cout << "feature size: " << feat_val.Size() << std::endl;
 
-            char query_str[query_buff.len + 1];
-            std::copy(query_buff.p, query_buff.p + query_buff.len, query_str);
-            query_str[query_buff.len] = '\0';
-
-            struct query q = parse_query(query_str);
-
-            if(!q.okay) {
-
-                res = "{\"error\":\"malformed query\"}";
-
-            } else {
-
-                std::cout << q.filename;
-
-                std::string region = q.region;
-                size_t filename_idx = filename_reverse[region][q.filename];
-                point feature = points[region][filename_idx];
-
-                //std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
-
-                std::vector<point> nearest(q.limit);
-                std::vector<float> distances;
-
-                vp_tree_map[region]->search(feature, q.limit, &nearest, &distances);
-
-                std::vector<std::vector<float> > pca = pca_2(nearest);
-
-                auto tn = std::chrono::high_resolution_clock::now();
-
-                float time_taken = (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count())/1000.0f;
-                res = format_res(q.region, feature, nearest, pca, time_taken);
-
+                    for (rapidjson::SizeType i = 0; i < feat_val.Size(); ++i) {
+                        // std::cout << feat_val[i].GetDouble() << std::endl;
+                        feature.pt[i] = (float)feat_val[i].GetDouble();
+                    }
+                    parse_success = true;
+                //} else {
+                //    std::cout << "bad feature size!\n"
+                //}
             }
-            auto tn = std::chrono::high_resolution_clock::now();
-            std::cout << " : " << (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count());
-            std::cout << "ms" << std::endl;
+        } else {
+            std::cout << "document is not object or has no feature attribute\n";
+        }
+    } else {
+        std::cout << "parse json file fail!\n";
+    }
 
-            mg_printf(c,  "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: %d\r\n"
-                          "\r\n"
-                          "%s",
-                          (int) res.length(), res.c_str());
-            c->flags |= MG_F_SEND_AND_CLOSE;
+    std::string res = "";
+    if (parse_success) {
+        std::vector<point> nearest(limits);
+        std::vector<float> distances;
+
+        vp_tree_map[region]->search(feature, limits, &nearest, &distances);
+
+        std::vector<std::vector<float> > pca = pca_2(nearest);
+
+        auto tn = std::chrono::high_resolution_clock::now();
+
+        float time_taken = (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count())/1000.0f;
+        res = format_res(region, feature, nearest, pca, time_taken);
+    } else {
+        res = "{\"error\":\"malformed query\"}";
+    }
+
+    auto tn = std::chrono::high_resolution_clock::now();
+    std::cout << " : " << (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count());
+    std::cout << "ms" << std::endl;
+
+    mg_printf(c,  "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "Content-Length: %d\r\n"
+                    "\r\n"
+                    "%s",
+                    (int)res.length(), res.c_str());
+
+    c->flags |= MG_F_SEND_AND_CLOSE;
+}
+
+static void handle_similar_call_v1(struct mg_connection *c, struct http_message *hm) {
+    struct mg_str query_buff = hm->query_string;
+
+    if(query_buff.len != 0) {
+        auto ts = std::chrono::high_resolution_clock::now();
+
+        std::string res = "";
+
+        char query_str[query_buff.len + 1];
+        std::copy(query_buff.p, query_buff.p + query_buff.len, query_str);
+        query_str[query_buff.len] = '\0';
+
+        struct query q = parse_query(query_str);
+
+        if(!q.okay) {
+
+            res = "{\"error\":\"malformed query\"}";
 
         } else {
 
-            mg_printf(c, "HTTP/1.1 200 OK\r\n"
-                  "Content-Type: application/json\r\n"
-                  "Content-Length: 0\r\n"
-                  );
-            c->flags |= MG_F_SEND_AND_CLOSE;
+            std::cout << q.filename;
 
+            std::string region = q.region;
+            size_t filename_idx = filename_reverse[region][q.filename];
+            point feature = points[region][filename_idx];
+
+            //std::vector<point> nearest = cover_tree_map[region]->nearNeighborsMulti(feature, q.limit);
+
+            std::vector<point> nearest(q.limit);
+            std::vector<float> distances;
+
+            vp_tree_map[region]->search(feature, q.limit, &nearest, &distances);
+
+            std::vector<std::vector<float> > pca = pca_2(nearest);
+
+            auto tn = std::chrono::high_resolution_clock::now();
+
+            float time_taken = (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count())/1000.0f;
+            res = format_res(q.region, feature, nearest, pca, time_taken);
+
+        }
+        auto tn = std::chrono::high_resolution_clock::now();
+        std::cout << " : " << (float)(std::chrono::duration_cast<std::chrono::milliseconds>(tn - ts).count());
+        std::cout << "ms" << std::endl;
+
+        mg_printf(c,  "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: %d\r\n"
+                      "\r\n"
+                      "%s",
+                      (int) res.length(), res.c_str());
+        c->flags |= MG_F_SEND_AND_CLOSE;
+
+    } else {
+
+        mg_printf(c, "HTTP/1.1 200 OK\r\n"
+              "Content-Type: application/json\r\n"
+              "Content-Length: 0\r\n"
+              );
+        c->flags |= MG_F_SEND_AND_CLOSE;
+
+    }
+}
+
+static void ev_handler(struct mg_connection *c, int ev, void *p) {
+    if (ev == MG_EV_HTTP_REQUEST) {
+        struct http_message *hm = (struct http_message *) p;
+        if (mg_vcmp(&hm->uri, "/similar/v2") == 0) {
+            handle_similar_call_v2(c, hm);
+        } else if (mg_vcmp(&hm->uri, "/similar/v1") == 0) {
+            handle_similar_call_v1(c, hm);
         }
     }
 }
